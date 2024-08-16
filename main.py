@@ -1,13 +1,9 @@
 import pygame as pg
-import numpy as np
+import numpy as np 
 
-try: 
-    import taichi as ti
-    ti.init(arch=ti.gpu)
-except:
-    pass
-    
-tile_size, tile_grid = 10, 40
+
+
+tile_size, tile_grid = 7, 50
 RES = WIDTH, HEIGHT = tile_grid*tile_size, tile_grid*tile_size
 screen = pg.display.set_mode(RES) 
 clock = pg.time.Clock()
@@ -61,6 +57,7 @@ class Tile():
         self.center = (self.x*tile_size +tile_size/2, self.y*tile_size +tile_size/2)
         if debug:
             pg.draw.line(screen, (255, 0, 0), self.center+self.v*tile_size, self.center)
+
     def update(self):
         #diffuse
         self.Sc = 0
@@ -128,12 +125,13 @@ while running :
                 tile.Dc -= 50
     if pg.mouse.get_pressed()[2]:
         mouse_pos0 = mouse_pos
+        d = []
+        for tile in tiles:
+            if pg.draw.circle(screen, (0, 255, 0), (mouse_pos0), r).colliderect(tile.rect):
+                d.append(tiles.index(tile))
         val = True
         while val:
-            d = []
-            for tile in tiles:
-                if pg.draw.circle(screen, (0, 255, 0), (mouse_pos0), r).colliderect(tile.rect):
-                    d.append(tiles.index(tile))
+
             mouse_pos = pg.mouse.get_pos()
             if not pg.mouse.get_pressed()[1]: val = False
             for event in pg.event.get():
