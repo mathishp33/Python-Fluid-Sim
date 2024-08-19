@@ -1,9 +1,10 @@
 import pygame as pg
 import numpy as np 
+from numba import njit
+from numba import jit
 
 
-
-tile_size, tile_grid = 7, 50
+tile_size, tile_grid = 30, 15
 RES = WIDTH, HEIGHT = tile_grid*tile_size, tile_grid*tile_size
 screen = pg.display.set_mode(RES) 
 clock = pg.time.Clock()
@@ -16,15 +17,19 @@ debug = False
 def IX(x, y):
     return x+y*tile_grid
           
+@njit(fastmath=True)
 def lerp(a, b, m):
     a, b, m = float(a), float(b), float(m)
     return a+m*(b-a)
+    
+@jit(fastmath=True, forceobj=True, parallel=True, looplift=True)
+def loop0(pos, v, ID):
+    for i in range(len(tiles)):
+        tile = tiles[i]
+        if pg.rect.Rect(tile.x*tile_size, tile.y*tile_size, tile_size, tile_size).collidepoint((pos+v)*tile_size):
+            tiles[ID].advection(tile)
+            return True
 
-def check(x,y):
-    if x != tile_grid-1 or x != 0 or y != tile_grid-1 or y != 0: 
-        return False
-    else:
-        return True
         
 class Tile():
     def __init__(self, x, y):
@@ -33,11 +38,11 @@ class Tile():
         self.Dc = 0
         self.Dn = 0
         self.k = 0.4
-        self.c = 0.9
+        self.c = 0.8
         self.Sc = 0
         self.l = 0
         self.color = (0, 0, 0)
-        self.v = np.array([0, 0])
+        self.v = np.array([0.0, 0.0]).astype(np.float64)
         self.f = np.array([0, 0])
         self.i = np.array([0, 0])
         self.o = np.array([0, 0])
@@ -57,7 +62,29 @@ class Tile():
         self.center = (self.x*tile_size +tile_size/2, self.y*tile_size +tile_size/2)
         if debug:
             pg.draw.line(screen, (255, 0, 0), self.center+self.v*tile_size, self.center)
-
+            
+    def advection(self, tile):
+        self.o = np.array([tile.x, tile.y])
+        self.f = self.o - self.v
+        self.i = np.floor(self.f).astype(np.int64)
+        self.j = self.f - self.i
+        if self.x != tile_grid-1:
+            self.z1 = lerp(tiles[IX(self.i[0], self.i[1])].Dc, tiles[IX(self.i[0]+1, self.i[1])].Dc, self.j[0])
+        else : self.z1 = tiles[IX(self.i[0], self.i[1])].Dc
+        if self.y != tile_grid-1 and self.x != tile_grid-1:
+            self.z2 = lerp(tiles[IX(self.i[0], self.i[1]+1)].Dc, tiles[IX(self.i[0]+1, self.i[1]+1)].Dc, self.j[0])
+        elif self.y != tile_grid-1:
+            self.z2 = tiles[IX(self.i[0], self.i[1]+1)].Dc
+        if self.x != tile_grid-1 and  self.y != tile_grid-1: 
+            self.z3 = float(lerp(self.z1, self.z2, self.j[1]))
+        else : self.z3 = self.Dc
+        if self.Dc<self.z3:
+            self.z3 = self.Dc
+        tiles[IX(self.o[0], self.o[1])].Dc += self.z3
+        self.Dc -= self.z3
+        tiles[IX(self.o[0], self.o[1])].v += (self.v).astype(np.float64)
+        
+        
     def update(self):
         #diffuse
         self.Sc = 0
@@ -79,31 +106,10 @@ class Tile():
         self.Dn = self.Dc+self.k*(self.Sc-self.Dc)
         self.Dc = self.Dn
         #advection
-        if abs(self.v[0])+abs(self.v[1]) < 2: self.v = np.array([0, 0])
-        if not (self.v  == np.array([0, 0])).all():
-            for tile in tiles:
-                if pg.rect.Rect(tile.x*tile_size, tile.y*tile_size, tile_size, tile_size).collidepoint((self.pos+self.v)*tile_size):
-                    self.o = np.array([tile.x, tile.y])
-                    self.f = self.o - self.v
-                    self.i = np.floor(self.f).astype(np.int64)
-                    self.j = self.f - self.i
-                    if self.x != tile_grid-1:
-                        self.z1 = lerp(tiles[IX(self.i[0], self.i[1])].Dc, tiles[IX(self.i[0]+1, self.i[1])].Dc, self.j[0])
-                    else : self.z1 = tiles[IX(self.i[0], self.i[1])].Dc
-                    if self.y != tile_grid-1 and self.x != tile_grid-1:
-                        self.z2 = lerp(tiles[IX(self.i[0], self.i[1]+1)].Dc, tiles[IX(self.i[0]+1, self.i[1]+1)].Dc, self.j[0])
-                    elif self.y != tile_grid-1:
-                        self.z2 = tiles[IX(self.i[0], self.i[1]+1)].Dc
-                    if self.x != tile_grid-1 and  self.y != tile_grid-1: 
-                        self.z3 = float(lerp(self.z1, self.z2, self.j[1]))
-                    else : self.z3 = self.Dc
-                    if self.Dc<self.z3:
-                        self.z3 = self.Dc
-                    tiles[IX(self.o[0], self.o[1])].Dc += self.z3
-                    self.Dc -= self.z3
-            self.v = self.v*self.c
-
-
+        if abs(self.v[0])+abs(self.v[1]) < 0.5: self.v = np.array([0.0, 0.0])
+        if not (self.v  == np.array([0.0, 0.0])).all():
+            loop0(self.pos, self.v, IX(self.x, self.y))
+        self.v = self.v*self.c
         
 tiles = [Tile(j, i) for i in range(tile_grid) for j in range(tile_grid)]
 
@@ -133,15 +139,15 @@ while running :
         while val:
 
             mouse_pos = pg.mouse.get_pos()
-            if not pg.mouse.get_pressed()[1]: val = False
+            if not pg.mouse.get_pressed()[2]: val = False
             for event in pg.event.get():
                 if event.type == pg.QUIT:
                     running = False
                     val = False
             clock.tick(60)
-        v = (np.array(mouse_pos)-np.array(mouse_pos0))//tile_size
+        v = ((np.array(mouse_pos)-np.array(mouse_pos0))//tile_size).astype(np.float64)
         for d0 in d:
-            tiles[d0].v += v
+            tiles[d0].v += v*0.3
 
             
     for i in  tiles:
